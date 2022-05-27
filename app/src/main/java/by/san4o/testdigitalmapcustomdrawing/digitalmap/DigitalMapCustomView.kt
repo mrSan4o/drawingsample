@@ -3,6 +3,7 @@ package by.san4o.testdigitalmapcustomdrawing.digitalmap
 import android.content.Context
 import android.graphics.Canvas
 import android.graphics.Color
+import android.graphics.Matrix
 import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.Rect
@@ -15,8 +16,13 @@ import android.view.ScaleGestureDetector
 import android.view.View
 import android.view.WindowManager
 import androidx.core.view.ViewCompat
+import by.san4o.testdigitalmapcustomdrawing.digitalmap.element.Circle
+import by.san4o.testdigitalmapcustomdrawing.digitalmap.element.CircleDrawElement
+import by.san4o.testdigitalmapcustomdrawing.digitalmap.element.DrawElement
+import by.san4o.testdigitalmapcustomdrawing.digitalmap.element.RectDrawElement
 
 class DigitalMapCustomView(context: Context, attrs: AttributeSet) : View(context, attrs) {
+    var onElementSelected: (DrawElement) -> Unit = {}
     private val paintRed = Paint()
         .apply {
             color = Color.RED
@@ -37,9 +43,17 @@ class DigitalMapCustomView(context: Context, attrs: AttributeSet) : View(context
         .apply {
             color = Color.YELLOW
         }
-    private val rect = Rect(10, 50, 200, 200)
+    private val canvasMatrix = Matrix()
+    private val invertedMatrix = Matrix()
+
+    private val rect = RectF(10f, 50f, 200f, 200f)
     private var circle: Circle = Circle(0f, 0f, 0f)
     private val circle2: Circle = Circle(500f, 300f, 100f)
+
+    private val elements: MutableList<DrawElement> = mutableListOf(
+        RectDrawElement("Rectangle1", RectF(10f, 50f, 200f, 200f), paintRed),
+        CircleDrawElement("Circle1", Circle(500f, 300f, 100f), paintGreen),
+    )
 
     private var scaleFactor = 1f
     private var scaleFocusX = 0f
@@ -53,7 +67,9 @@ class DigitalMapCustomView(context: Context, attrs: AttributeSet) : View(context
         }
 
         override fun onScale(detector: ScaleGestureDetector): Boolean {
-            scaleFactor *= detector.scaleFactor
+            val factor = detector.scaleFactor
+
+            scaleFactor *= factor
             val currentSpan = detector.currentSpan
             val focusX = detector.focusX
             val focusY = detector.focusY
@@ -61,7 +77,10 @@ class DigitalMapCustomView(context: Context, attrs: AttributeSet) : View(context
             val currentSpanY = detector.currentSpanY
 
             // Don't let the object get too small or too large.
+            // TODO Important нужно чтобы фактор зависил и матрица была связана одним органичение, чтобы не расходилось
             scaleFactor = Math.max(1f, Math.min(scaleFactor, 5.0f))
+            Log.d(TAG, "onScale: $factor, scaleFactor=$scaleFactor")
+            canvasMatrix.postScale(factor, factor, scaleFocusX, scaleFocusY)
 
             ViewCompat.postInvalidateOnAnimation(this@DigitalMapCustomView)
             return true
@@ -72,14 +91,7 @@ class DigitalMapCustomView(context: Context, attrs: AttributeSet) : View(context
     private val displayWidth: Int
     private val displayHeight: Int
 
-    private val AXIS_X_MIN = -1f
-    private val AXIS_X_MAX = 1f
-    private val AXIS_Y_MIN = -1f
-    private val AXIS_Y_MAX = 1f
-    private val mCurrentViewport = RectF(AXIS_X_MIN, AXIS_Y_MIN, AXIS_X_MAX, AXIS_Y_MAX)
-    private var firstDraw = true
-    private var canvasX: Float = 0f
-    private var canvasY: Float = 0f
+
     private val gestureListener = object : GestureDetector.SimpleOnGestureListener() {
 
         override fun onDown(e: MotionEvent?): Boolean {
@@ -92,11 +104,16 @@ class DigitalMapCustomView(context: Context, attrs: AttributeSet) : View(context
             distanceX: Float,
             distanceY: Float
         ): Boolean {
+            val x = e2.x
+            val y = e2.y
 
-            canvasX += -1 * distanceX / scaleFactor
-            canvasY += -1 * distanceY / scaleFactor
+            val offsetX = distanceX / scaleFactor
+            val offsetY = distanceY / scaleFactor
+            canvasMatrix.postTranslate(-1 * offsetX, -1 * offsetY)
 
-            Log.d(">>>", "gestureListener distanceX=$distanceX, distanceY=$distanceY")
+            Log.d(TAG, "onScroll: e1(${e1.x},${e1.y}) e2(${e2.x},${e2.y})")
+            Log.d(TAG, "onScroll distanceX=$distanceX, distanceY=$distanceY")
+            Log.d(TAG, "onScroll: offset $offsetX, $offsetY")
             ViewCompat.postInvalidateOnAnimation(this@DigitalMapCustomView)
 
             return true
@@ -105,42 +122,70 @@ class DigitalMapCustomView(context: Context, attrs: AttributeSet) : View(context
 
     private val gestureDetector = GestureDetector(context, gestureListener)
 
-    private val shadowPaint = Paint()
-        .apply {
-            setShadowLayer(12f, 0f, 0f, Color.YELLOW)
-        }
-    private var itemDragging = false
+    private var draggingElement: DrawElement? = null
+    private var selectedElement: DrawElement? = null
     private val draggingDetector = GestureDetector(context, object : GestureDetector.SimpleOnGestureListener() {
 
         override fun onLongPress(e: MotionEvent) {
             val x = e.x
             val y = e.y
 
-
             Log.d(TAG, "onLongPress: onLongPress $x, $y")
-            if (rect.contains(x.toInt(), y.toInt())) {
-                itemDragging = true
-                Log.d(TAG, "onLongPress: rect.contains")
-                rectPaint.setShadowLayer(8f, 10f, 10f, Color.GRAY)
-                invalidate()
-            }
+            val point = invertedPoints(x, y)
+            val invertedX = point[0]
+            val invertedY = point[1]
+
+            draggingElement = elements
+                .find { it.contains(invertedX, invertedY) }
+                ?.also { element ->
+                    element.starDragging()
+                    invalidate()
+                }
         }
     })
+
+    private fun invertedPoints(x: Float, y: Float): FloatArray {
+        val point = floatArrayOf(x, y)
+        if (canvasMatrix.invert(invertedMatrix)) {
+            invertedMatrix.mapPoints(point)
+        }
+        return point
+    }
+
+    private val selectDetector = GestureDetector(context, object : GestureDetector.SimpleOnGestureListener() {
+        override fun onDoubleTap(e: MotionEvent): Boolean {
+            Log.d(TAG, "onDoubleTap: ${e.x}, ${e.y}")
+            val point = invertedPoints(e.x, e.y)
+            val invertedX = point[0]
+            val invertedY = point[1]
+
+            selectedElement = elements
+                .find { it.contains(invertedX, invertedY) }
+                ?.also {
+                    it.setSelected(true)
+                    invalidate()
+                    onElementSelected(it)
+                }
+
+            return selectedElement != null
+        }
+    })
+
+    private val centerX: Float
+    private val centerY: Float
 
     init {
         val display = (context.getSystemService(Context.WINDOW_SERVICE) as WindowManager).defaultDisplay!!
 
         displayWidth = display.width
         displayHeight = display.height
-        val centerX = displayWidth / 2
-        val centerY = displayHeight / 2
+        centerX = displayWidth / 2f
+        centerY = displayHeight / 2f
 
         invalidate()
 
         circle = Circle(centerX.toFloat(), centerY.toFloat(), 150f)
         // square.set(centerX, centerY, square.right, square.bottom)
-
-        setLayerType(LAYER_TYPE_SOFTWARE, shadowPaint);
     }
 
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
@@ -153,21 +198,44 @@ class DigitalMapCustomView(context: Context, attrs: AttributeSet) : View(context
         val x = event.x
         val y = event.y
         when (event.action and MotionEvent.ACTION_MASK) {
+            MotionEvent.ACTION_DOWN -> {
+                val element = selectedElement
+                if (element != null) {
+                    val points = invertedPoints(x, y)
+                    if (!element.contains(points[0], points[1])) {
+                        element.setSelected(false)
+                        selectedElement = null
+                        invalidate()
+                        return true
+                    }
+                }
+            }
             MotionEvent.ACTION_UP -> {
-                if (itemDragging) {
-                    itemDragging = false
+                if (draggingElement != null) {
+                    draggingElement?.endDragging()
+                    draggingElement = null
                     Log.d(TAG, "onTouchEvent[ACTION_UP]: clearShadowLayer")
-                    rectPaint.clearShadowLayer()
+                    invalidate()
+                    return true
+                }
+            }
+            MotionEvent.ACTION_MOVE -> {
+                if (draggingElement != null) {
+                    val touch = invertedPoints(x, y)
+                    draggingElement?.dragTo(touch[0], touch[1])
+
                     invalidate()
                     return true
                 }
             }
         }
 
-        return draggingDetector.onTouchEvent(event)
+        return selectDetector.onTouchEvent(event)
+            || draggingDetector.onTouchEvent(event)
             || gestureDetector.onTouchEvent(event)
             || scaleDetector.onTouchEvent(event)
     }
+
 
     override fun onDraw(canvas: Canvas?) {
         super.onDraw(canvas)
@@ -183,15 +251,17 @@ class DigitalMapCustomView(context: Context, attrs: AttributeSet) : View(context
         //     scaleFocusY = height / 2f
         //     firstDraw = false
         // }
-        Log.d(">>>", "onDraw scale=$scaleFactor(focus=$scaleFocusX, $scaleFocusY),  canvas=$canvasX,$canvasY")
-        canvas.scale(scaleFactor, scaleFactor, scaleFocusX, scaleFocusY)
+        Log.d(">>>", "onDraw scale=$scaleFactor(focus=$scaleFocusX, $scaleFocusY)")
+//        canvas.scale(scaleFactor, scaleFactor, scaleFocusX, scaleFocusY)
 
-        canvas.translate(canvasX, canvasY)
 
-        canvas.drawRect(rect, rectPaint)
-        canvas.drawCircle(circle.x, circle.y, circle.r, paintYellow)
-        canvas.drawCircle(circle2.x, circle2.y, circle2.r, paintGreen)
-        canvas.drawTriangle(paintBlue, 600, 800, 200)
+        canvas.setMatrix(canvasMatrix)
+
+        elements.forEach { it.draw(canvas) }
+//        canvas.drawRect(rect, rectPaint)
+//        canvas.drawCircle(circle.x, circle.y, circle.r, paintYellow)
+//        canvas.drawCircle(circle2.x, circle2.y, circle2.r, paintGreen)
+//        canvas.drawTriangle(paintBlue, 600, 800, 200)
 
         canvas.restore()
     }
@@ -207,13 +277,85 @@ class DigitalMapCustomView(context: Context, attrs: AttributeSet) : View(context
         this.drawPath(path, paint)
     }
 
-    data class Circle(
-        val x: Float,
-        val y: Float,
-        val r: Float,
-    )
+    fun setDetails(details: ElementDetails) {
+        selectedElement?.also { el ->
+            el.color = details.color
+            el.name = details.name
+            el.setSelected(false)
+            selectedElement = null
+            invalidate()
+        }
+    }
+
+    fun rotateSelected(rotate: Float) {
+
+        selectedElement?.also { el ->
+            el.rotate(rotate)
+            el.setSelected(false)
+            selectedElement = null
+            invalidate()
+        }
+    }
+
+    fun removeSelected() {
+        selectedElement?.also { el ->
+            elements.remove(el)
+            selectedElement = null
+            invalidate()
+        }
+    }
+
+    fun addFigure(figure: ElementFigure) {
+        elements.add(
+            when (figure) {
+                ElementFigure.Rectangle ->
+                    RectDrawElement(
+                        name = "rect",
+                        rect = rectByCenter(centerX, centerY, 200f, 300f),
+                        paint = Paint().apply {
+                            color = Color.RED
+                        }
+                    )
+
+                ElementFigure.Square ->
+                    RectDrawElement(
+                        name = "square",
+                        rect = rectByCenter(centerX, centerY, 300f, 300f),
+                        paint = Paint().apply {
+                            color = Color.RED
+                        }
+                    )
+                ElementFigure.Circle ->
+                    CircleDrawElement(
+                        name = "name",
+                        circle = Circle(centerX, centerY, 200f),
+                        paint = Paint().apply {
+                            color = Color.RED
+                        }
+                    )
+            }
+        )
+
+        invalidate()
+    }
+
+    fun rotate(value: Int) {
+        canvasMatrix.postRotate(value.toFloat(), centerX, centerY)
+        invalidate()
+    }
 
     companion object {
         const val TAG = ">>>"
     }
 }
+
+private fun Rect.newCenter(x: Int, y: Int) {
+    val centerXPart = centerX() - left
+    val centerYPart = centerY() - top
+    val left = x - centerXPart
+    val top = y - centerYPart
+    val right = x + centerXPart
+    val bottom = y + centerXPart
+    set(left, top, right, bottom)
+}
+
