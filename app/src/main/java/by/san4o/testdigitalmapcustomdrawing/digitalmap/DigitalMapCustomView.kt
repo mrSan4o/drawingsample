@@ -20,6 +20,7 @@ import by.san4o.testdigitalmapcustomdrawing.digitalmap.element.Circle
 import by.san4o.testdigitalmapcustomdrawing.digitalmap.element.CircleDrawElement
 import by.san4o.testdigitalmapcustomdrawing.digitalmap.element.DrawElement
 import by.san4o.testdigitalmapcustomdrawing.digitalmap.element.RectDrawElement
+import kotlin.random.Random
 
 class DigitalMapCustomView(context: Context, attrs: AttributeSet) : View(context, attrs) {
     var onElementSelected: (DrawElement) -> Unit = {}
@@ -50,10 +51,31 @@ class DigitalMapCustomView(context: Context, attrs: AttributeSet) : View(context
     private var circle: Circle = Circle(0f, 0f, 0f)
     private val circle2: Circle = Circle(500f, 300f, 100f)
 
-    private val elements: MutableList<DrawElement> = mutableListOf(
-        RectDrawElement("Rectangle1", RectF(10f, 50f, 200f, 200f), paintRed),
-        CircleDrawElement("Circle1", Circle(500f, 300f, 100f), paintGreen),
-    )
+    //    private val elements: MutableList<DrawElement> = mutableListOf(
+//        RectDrawElement("Rectangle1", RectF(10f, 50f, 200f, 200f), paintRed),
+//        CircleDrawElement("Circle1", Circle(500f, 300f, 100f), paintGreen),
+//    )
+    private val elements: MutableList<DrawElement> = (1..1000000).map {
+        val centerX = Random.nextInt(-10000, 10000).toFloat()
+        val centerY = Random.nextInt(-10000, 10000).toFloat()
+        val figure = ElementFigure.values()
+            .let { arr -> arr[Random.nextInt(0, arr.size)] }
+        val color = ElementColor.values()
+            .let { arr ->
+                arr[Random.nextInt(0, arr.size)]
+            }
+        val paint = Paint().apply {
+            this.color = color.toPaintColor()
+        }
+        when (figure) {
+            ElementFigure.Rectangle ->
+                RectDrawElement("Rectangle$it", rectByCenter(centerX, centerY, 100f, 50f), paint)
+            ElementFigure.Square ->
+                RectDrawElement("Square$it", rectByCenter(centerX, centerY, 100f, 100f), paint)
+            ElementFigure.Circle ->
+                CircleDrawElement("Circle$it", Circle(centerX, centerY, 100f), paint)
+        }
+    }.toMutableList()
 
     private var scaleFactor = 1f
     private var scaleFocusX = 0f
@@ -173,6 +195,7 @@ class DigitalMapCustomView(context: Context, attrs: AttributeSet) : View(context
 
     private val centerX: Float
     private val centerY: Float
+    private val paint: Paint = Paint()
 
     init {
         val display = (context.getSystemService(Context.WINDOW_SERVICE) as WindowManager).defaultDisplay!!
@@ -185,6 +208,7 @@ class DigitalMapCustomView(context: Context, attrs: AttributeSet) : View(context
         invalidate()
 
         circle = Circle(centerX.toFloat(), centerY.toFloat(), 150f)
+        setLayerType(LAYER_TYPE_SOFTWARE, paint);
         // square.set(centerX, centerY, square.right, square.bottom)
     }
 

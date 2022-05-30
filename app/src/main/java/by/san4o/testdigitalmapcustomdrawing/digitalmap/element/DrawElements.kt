@@ -1,6 +1,7 @@
 package by.san4o.testdigitalmapcustomdrawing.digitalmap.element
 
 import android.graphics.Canvas
+import android.graphics.Color
 import android.graphics.Matrix
 import android.graphics.Paint
 import android.graphics.Paint.Align
@@ -8,6 +9,7 @@ import android.graphics.Path
 import android.graphics.RectF
 import android.util.Log
 import by.san4o.testdigitalmapcustomdrawing.digitalmap.newCenter
+import by.san4o.testdigitalmapcustomdrawing.digitalmap.toPaintColor
 
 
 class RectDrawElement(
@@ -42,7 +44,7 @@ class RectDrawElement(
 
 //        path.reset()
 
-        canvas.drawTextOnPath(name, path, 0f, 0f, textPaint)
+//        canvas.drawTextOnPath(name, path, 0f, 0f, textPaint)
 //        drawRectText(name, canvas, rect)
     }
 

@@ -30,7 +30,6 @@ abstract class AbstractDrawElement(
     protected val paint: Paint
 ) : DrawElement {
 
-
     override var color: ElementColor
         get() = when (paint.color) {
             Color.RED -> ElementColor.Red
